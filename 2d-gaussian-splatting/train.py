@@ -49,6 +49,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_dist_for_log = 0.0
     ema_normal_for_log = 0.0
 
+    ema_depth_for_log = 0.0
+
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
     for iteration in range(first_iter, opt.iterations + 1):        
@@ -70,9 +72,19 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
         
         gt_image = viewpoint_cam.original_image.cuda()
+
+        gt_mask = viewpoint_cam.gt_alpha_mask
+
+        # if gt_mask is not None:
+        #     image_masked = image * gt_mask
+        #     gt_image_masked = gt_image * gt_mask
+
+        #     Ll1 = l1_loss(image_masked, gt_image_masked)
+        #     loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image_masked, gt_image_masked))
+        # else:
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
-        
+    
         # regularization
         lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0
         lambda_dist = opt.lambda_dist if iteration > 3000 else 0.0
@@ -81,11 +93,44 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         rend_normal  = render_pkg['rend_normal']
         surf_normal = render_pkg['surf_normal']
         normal_error = (1 - (rend_normal * surf_normal).sum(dim=0))[None]
-        normal_loss = lambda_normal * (normal_error).mean()
-        dist_loss = lambda_dist * (rend_dist).mean()
+        # normal_loss = lambda_normal * (normal_error).mean()
+        # dist_loss = lambda_dist * (rend_dist).mean()
+
+        if gt_mask is not None:
+            bg_reg_factor = 10.0
+            reg_weight_map = gt_mask + (1.0 - gt_mask) * bg_reg_factor # 权重
+            normal_loss = lambda_normal * (normal_error * reg_weight_map).mean()
+            dist_loss = lambda_dist * (rend_dist * reg_weight_map).mean()
+        else:
+            normal_loss = lambda_normal * (normal_error).mean()
+            dist_loss = lambda_dist * (rend_dist).mean()
+
+        # 单目深度 loss
+        depth_loss = 0.0
+        if opt.lambda_depth > 0:
+            if viewpoint_cam.gt_depth is not None:
+                pred_depth = render_pkg["surf_depth"]
+                gt_depth = viewpoint_cam.gt_depth
+
+                # Pearson Correlation
+                pred_d = pred_depth.view(-1)
+                gt_d = gt_depth.view(-1)
+
+                pred_d_mean = pred_d.mean()
+                gt_d_mean = gt_d.mean()
+                pred_d_centered = pred_d - pred_d_mean
+                gt_d_centered = gt_d - gt_d_mean
+
+                covariance = (pred_d_centered * gt_d_centered).mean()
+                pred_d_std = torch.sqrt((pred_d_centered ** 2).mean() + 1e-8)
+                gt_d_std = torch.sqrt((gt_d_centered ** 2).mean() + 1e-8)
+                
+                correlation = covariance / (pred_d_std * gt_d_std + 1e-8)
+                depth_loss = opt.lambda_depth * (1.0 - correlation)
 
         # loss
-        total_loss = loss + dist_loss + normal_loss
+        # total_loss = loss + dist_loss + normal_loss
+        total_loss = loss + dist_loss + normal_loss + depth_loss
         
         total_loss.backward()
 

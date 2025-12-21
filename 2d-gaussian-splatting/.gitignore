@@ -5,6 +5,8 @@ build
 data
 *.ply
 **/PKG-INFO
+sam3
+data.zip
 # submodules
 **__pycache__**
 *.png

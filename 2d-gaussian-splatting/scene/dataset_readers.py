@@ -23,6 +23,8 @@ from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 
+import cv2
+
 class CameraInfo(NamedTuple):
     uid: int
     R: np.array
@@ -34,6 +36,8 @@ class CameraInfo(NamedTuple):
     image_name: str
     width: int
     height: int
+    gt_alpha_mask: np.array
+    gt_depth: np.array
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -67,6 +71,11 @@ def getNerfppNorm(cam_info):
 
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
     cam_infos = []
+
+    datasets_root = os.path.dirname(images_folder)
+    masks_folder = os.path.join(datasets_root, "masks")
+    depths_folder = os.path.join(datasets_root, "depths")
+
     for idx, key in enumerate(cam_extrinsics):
         sys.stdout.write('\r')
         # the exact output you're looking for:
@@ -98,8 +107,25 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         image_name = os.path.basename(image_path).split(".")[0]
         image = Image.open(image_path)
 
+        # 读 masks
+        gt_alpha_mask = None
+        mask_path = os.path.join(masks_folder, os.path.basename(image_path) + ".png")
+        if os.path.exists(mask_path):
+            mask = np.array(Image.open(mask_path))
+            if len(mask.shape) > 2:
+                mask = mask[:, :, 0]
+            gt_alpha_mask = mask.astype(np.float32) / 255.0
+
+        # 读 depth
+        gt_depth = None
+        depth_path = os.path.join(depths_folder, image_name + ".png")
+        if os.path.exists(depth_path):
+            depth_data = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+            if depth_data is not None:
+                gt_depth = depth_data.astype(np.float32) / 65535.0
+
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                              image_path=image_path, image_name=image_name, width=width, height=height)
+                              image_path=image_path, image_name=image_name, width=width, height=height, gt_alpha_mask=gt_alpha_mask, gt_depth=gt_depth)
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -214,7 +240,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             FovX = fovx
 
             cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                            image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1]))
+                            image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1], gt_alpha_mask=None, gt_depth=None))
             
     return cam_infos
 
