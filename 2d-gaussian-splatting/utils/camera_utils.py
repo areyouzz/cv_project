@@ -49,49 +49,54 @@ def loadCam(args, id, cam_info, resolution_scale):
         loaded_mask = None
         gt_image = resized_image_rgb
 
-    resize_shape = (resolution[1], resolution[0]) 
+    # resize_shape = (resolution[1], resolution[0]) 
 
-    # mask
-    if cam_info.gt_alpha_mask is not None:
-        import torch
-        mask_np = np.array(cam_info.gt_alpha_mask)
-        mask_tensor = torch.from_numpy(mask_np)
+    # # mask
+    # if cam_info.gt_alpha_mask is not None:
+    #     import torch
+    #     mask_np = np.array(cam_info.gt_alpha_mask)
+    #     mask_tensor = torch.from_numpy(mask_np)
 
-        # 做插值
-        if mask_tensor.dim() == 2: # [H, W]
-            mask_tensor = mask_tensor.unsqueeze(0).unsqueeze(0)
-        elif mask_tensor.dim() == 3: # [H, W, C]
-             mask_tensor = mask_tensor.permute(2,0,1)[:1, ...].unsqueeze(0)
-        mask_tensor = torch.nn.functional.interpolate(mask_tensor, size=resize_shape, mode='nearest')
+    #     # 做插值
+    #     if mask_tensor.dim() == 2: # [H, W]
+    #         mask_tensor = mask_tensor.unsqueeze(0).unsqueeze(0)
+    #     elif mask_tensor.dim() == 3: # [H, W, C]
+    #          mask_tensor = mask_tensor.permute(2,0,1)[:1, ...].unsqueeze(0)
+    #     mask_tensor = torch.nn.functional.interpolate(mask_tensor, size=resize_shape, mode='nearest')
 
-        loaded_mask = mask_tensor.squeeze(0) # [1, H, W]
+    #     loaded_mask = mask_tensor.squeeze(0) # [1, H, W]
 
-    # depth
-    loaded_depth = None
-    if cam_info.gt_depth is not None:
-        import torch
-        depth_np = np.array(cam_info.gt_depth)
-        depth_tensor = torch.from_numpy(depth_np)
+    # # depth
+    # loaded_depth = None
+    # if cam_info.gt_depth is not None:
+    #     import torch
+    #     depth_np = np.array(cam_info.gt_depth)
+    #     depth_tensor = torch.from_numpy(depth_np)
 
-        if depth_tensor.dim() == 2:
-            depth_tensor = depth_tensor.unsqueeze(0).unsqueeze(0)
-        elif depth_tensor.dim() == 3:
-            # 如果通道在最后 (H, W, 3)
-            if depth_tensor.shape[2] <= 4: 
-                depth_tensor = depth_tensor.permute(2, 0, 1) # -> [C, H, W]
+    #     if depth_tensor.dim() == 2:
+    #         depth_tensor = depth_tensor.unsqueeze(0).unsqueeze(0)
+    #     elif depth_tensor.dim() == 3:
+    #         # 如果通道在最后 (H, W, 3)
+    #         if depth_tensor.shape[2] <= 4: 
+    #             depth_tensor = depth_tensor.permute(2, 0, 1) # -> [C, H, W]
             
-            # 只取第一个通道，并增加 Batch 维 -> [1, 1, H, W]
-            depth_tensor = depth_tensor[:1, :, :].unsqueeze(0)
+    #         # 只取第一个通道，并增加 Batch 维 -> [1, 1, H, W]
+    #         depth_tensor = depth_tensor[:1, :, :].unsqueeze(0)
 
-        # 做插值
-        depth_tensor = torch.nn.functional.interpolate(depth_tensor, size=resize_shape, mode='bilinear', align_corners=False)
+    #     # 做插值
+    #     depth_tensor = torch.nn.functional.interpolate(depth_tensor, size=resize_shape, mode='bilinear', align_corners=False)
 
-        loaded_depth = depth_tensor.squeeze(0)
+    #     loaded_depth = depth_tensor.squeeze(0)
+
+    # return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
+    #               FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
+    #               image=gt_image, gt_alpha_mask=loaded_mask,
+    #               image_name=cam_info.image_name, uid=id, data_device=args.data_device, gt_depth=loaded_depth)
 
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                   image=gt_image, gt_alpha_mask=loaded_mask,
-                  image_name=cam_info.image_name, uid=id, data_device=args.data_device, gt_depth=loaded_depth)
+                  image_name=cam_info.image_name, uid=id, data_device=args.data_device)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []

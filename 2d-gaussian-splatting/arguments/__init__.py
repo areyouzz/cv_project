@@ -50,6 +50,7 @@ class ModelParams(ParamGroup):
         self._source_path = ""
         self._model_path = ""
         self._images = "images"
+        self._depths = "depths" # add depth regulation
         self._resolution = -1
         self._white_background = False
         self.data_device = "cuda"
@@ -83,17 +84,21 @@ class OptimizationParams(ParamGroup):
         self.rotation_lr = 0.001
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
-        self.lambda_dist = 0.0
+        self.lambda_dist = 0.0 # default is good
+        # self.lambda_dist = 100
         self.lambda_normal = 0.05
+        # self.lambda_normal = 0.2
         self.opacity_cull = 0.05
-
-        self.lambda_depth = 0.0
+    
+        self.depth_l1_weight_init = 0.01 
+        self.depth_l1_weight_final = 0.001
 
         self.densification_interval = 100
         self.opacity_reset_interval = 3000
         self.densify_from_iter = 500
         self.densify_until_iter = 15_000
-        self.densify_grad_threshold = 0.0002
+        self.densify_grad_threshold = 0.0002 # default is good
+        # self.densify_grad_threshold = 0.0001
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

@@ -1,101 +1,144 @@
 import argparse
-import cv2
 import glob
-import matplotlib
-import numpy as np
 import os
+import sys
+from pathlib import Path
+
+import cv2
+import numpy as np
 import torch
+from tqdm import tqdm
+
 from depth_anything_3.api import DepthAnything3
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Depth Anything V3')
+def get_image_list(img_path: str) -> list[str]:
+    extentions = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG']
+    files = []
+    for ext in extentions:
+        files.extend(glob.glob(os.path.join(img_path, ext)))
+        files.extend(glob.glob(os.path.join(img_path, '**', ext), recursive=True))
+    return sorted(list(set(files)))
+
+def save_depth(depth: np.ndarray, save_path: str, max_depth: float=2.5) -> float:
+    depth_clipped = np.clip(depth, 0, max_depth)
+    normalized = depth_clipped / max_depth
+
+    # save as 16-bit PNG
+    depth = (normalized * 65535).astype(np.uint16)
+    cv2.imwrite(save_path, depth)
+
+    return max_depth
+
+def save_depth_metadata(output_dir: str, max_depth: float, image_names: list[str]):
+    import json
+    metadata = {
+        "max_depth": max_depth,
+        "depth_format": "metric_linear",
+        "units": "meters",
+        "images": image_names
+    }
+    with open(os.path.join(output_dir, "depth_metadata.json"), 'w') as f:
+        json.dump(metadata, f, indent=2)
+
+def process_batch(
+    model: DepthAnything3,
+    image_paths: list[str],
+    output_dir: str,
+    conf_output_dir: str | None,
+    process_res: int,
+    use_ray_pose: bool,
+    max_depth: float,
+) -> list[str]:
     
-    parser.add_argument('--img-path', type=str, required=True, help='Path to image or folder')
-    parser.add_argument('--input-size', type=int, default=518, help='Resize size (process_res)')
-    parser.add_argument('--outdir', type=str, default='./vis_depth')
-    
-    # 直接接受 DA3 的模型名，例如: da3-large, da3-base, da3-small
-    parser.add_argument('--encoder', type=str, default='da3-large', help='Model name (e.g. da3-large)')
-    
-    parser.add_argument('--pred-only', dest='pred_only', action='store_true', help='only display the prediction')
-    parser.add_argument('--grayscale', dest='grayscale', action='store_true', help='do not apply colorful palette')
+    prediction = model.inference(
+        image=image_paths,
+        process_res=process_res,
+        process_res_method="upper_bound_resize",
+        use_ray_pose=use_ray_pose,
+        ref_view_strategy="saddle_balanced",
+        align_to_input_ext_scale=False,
+    )
+
+    saved_names = []
+    for i, img_path in enumerate(image_paths):
+        img_name = Path(img_path).stem
+        depth_save_path = os.path.join(output_dir, f"{img_name}.png")
+
+        depth = prediction.depth[i]
+        save_depth(depth, depth_save_path, max_depth=max_depth)
+        saved_names.append(img_name)
+
+        if conf_output_dir and hasattr(prediction, 'conf') and prediction.conf is not None:
+            conf = np.clip(prediction.conf[i], 0, 1)
+            conf_16bit = (conf * 65535).astype(np.uint16)
+            cv2.imwrite(os.path.join(conf_output_dir, f"{img_name}.png"), conf_16bit)
+
+    return saved_names
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--img-path', type=str, required=True,
+                        help='Path to images')
+    parser.add_argument('--outdir', type=str, required=True,
+                        help='Output directory for depth maps')
+    parser.add_argument('--model', type=str, default='da3-large',
+                        help='Model variant')
+    parser.add_argument('--process-res', type=int, default=1064,
+                        help='Processing resolution')
+    parser.add_argument('--multi-view-batch', type=int, default=8,
+                        help='Multi-view batch size')
+    parser.add_argument('--use-ray-pose', action='store_true',
+                        help='Use ray-based pose estimation')
+    parser.add_argument('--save-confidence', action='store_true',
+                        help='Save confidence maps')
+    parser.add_argument('--max-depth', type=float, default=2.5,
+                        help='Max depth for normalization in meters')
     
     args = parser.parse_args()
-    
-    DEVICE = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
-    
-    print(f"Loading Depth Anything V3 model: {args.encoder}...")
-    # 直接使用 args.encoder 作为模型名加载
-    # 格式应该是 "depth-anything/DA3-LARGE" 这种，或者简单的 "da3-large" (库内部会自动处理)
-    # 为了稳健，我们假设用户输入的是 "da3-large"，手动拼接前缀，或者依赖库的自动推断
-    # depth_anything_3.api 通常接受 "da3-large" 这样的简写
-    model = DepthAnything3(model_name=args.encoder).to(DEVICE)
-    
-    # 获取文件列表
-    if os.path.isfile(args.img_path):
-        if args.img_path.endswith('txt'):
-            with open(args.img_path, 'r') as f:
-                filenames = f.read().splitlines()
-        else:
-            filenames = [args.img_path]
-    else:
-        filenames = glob.glob(os.path.join(args.img_path, '**/*'), recursive=True)
-    
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    image_paths = get_image_list(args.img_path)
+    if not image_paths:
+        print(f"Error: No images found at {args.img_path}")
+        sys.exit(1)
+    print(f"Found {len(image_paths)} images")
+
     os.makedirs(args.outdir, exist_ok=True)
+    conf_dir = None
+    if args.save_confidence:
+        conf_dir = os.path.join(os.path.dirname(args.outdir), "depth_confidence")
+        os.makedirs(conf_dir, exist_ok=True)
     
-    cmap = matplotlib.colormaps.get_cmap('Spectral_r')
+    print(f"Loading model: depth-anything/{args.model.upper()}...")
+    model = DepthAnything3.from_pretrained("./DA3-LARGE-1").to(device)
+    model.eval()
+    print("Model loaded.")
+
+    batch_size = max(1, args.multi_view_batch)
+    num_batches = (len(image_paths) + batch_size - 1) // batch_size
+
+    all_saved = []
+    with tqdm(total=len(image_paths), desc="Processing", unit="img") as pbar:
+        for batch_idx in range(num_batches):
+            start = batch_idx * batch_size
+            end = min(start + batch_size, len(image_paths))
+            batch = image_paths[start:end]
+
+            try:
+                saved = process_batch(model, batch, args.outdir, conf_dir, args.process_res, args.use_ray_pose, args.max_depth)
+                all_saved.extend(saved)
+                pbar.update(len(batch))
+            except Exception as e:
+                print(f"\nError: {e}")
+                pbar.update(len(batch))
+        
     
-    for k, filename in enumerate(filenames):
-        print(f'Progress {k+1}/{len(filenames)}: {filename}')
-        
-        raw_image = cv2.imread(filename)
-        if raw_image is None:
-            continue
-            
-        # DA3 API 期望 RGB 输入，OpenCV 读取的是 BGR
-        image_rgb = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB)
-        
-        # 推理
-        prediction = model.inference(
-            image=[image_rgb],
-            process_res=args.input_size,
-            process_res_method="upper_bound_resize",
-            align_to_input_ext_scale=False
-        )
-        
-        depth = prediction.depth[0] # 取出第一张图的深度 (H, W)
-        
-        # 归一化到 0-255 (可视化用)
-        if depth.max() > depth.min():
-            depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
-        else:
-            depth = np.zeros_like(depth)
-            
-        depth = depth.astype(np.uint8)
+    save_depth_metadata(args.outdir, args.max_depth, all_saved)
 
-        depth_norm = (depth - depth.min()) / (depth.max() - depth.min())
-        depth_16bit = (depth_norm * 65535).astype(np.uint16)
-        
-        # 处理输出颜色
-        if args.grayscale:
-            depth = np.repeat(depth[..., np.newaxis], 3, axis=-1)
-        else:
-            depth = (cmap(depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
-        
-        # 保存文件名
-        save_name = os.path.join(args.outdir, os.path.splitext(os.path.basename(filename))[0] + '.png')
-        
-        if args.pred_only:
-            # cv2.imwrite(save_name, depth)
-            cv2.imwrite(save_name, depth_16bit)
-        else:
-            # 拼接对比图
-            # 如果尺寸因为 padding 发生微小变化，做一下 resize 对齐
-            if raw_image.shape[:2] != depth.shape[:2]:
-                raw_image = cv2.resize(raw_image, (depth.shape[1], depth.shape[0]))
-                
-            split_region = np.ones((raw_image.shape[0], 50, 3), dtype=np.uint8) * 255
-            combined_result = cv2.hconcat([raw_image, split_region, depth])
-            cv2.imwrite(save_name, combined_result)
+    print(f"\nDone! Metric depth maps saved to: {args.outdir}")
+    print(f"Max depth normalization: {args.max_depth}m")
 
-    print("Done.")
+if __name__ == '__main__':
+    main()
