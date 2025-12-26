@@ -49,7 +49,32 @@ def loadCam(args, id, cam_info, resolution_scale):
         loaded_mask = None
         gt_image = resized_image_rgb
 
-    # resize_shape = (resolution[1], resolution[0]) 
+    resize_shape = (resolution[1], resolution[0])  # [H, W]
+
+    # Resize mask
+    if hasattr(cam_info, 'gt_alpha_mask') and cam_info.gt_alpha_mask is not None:
+        import torch
+        mask_tensor = torch.from_numpy(cam_info.gt_alpha_mask).float()
+        if mask_tensor.dim() == 2:
+            mask_tensor = mask_tensor.unsqueeze(0).unsqueeze(0)
+        elif mask_tensor.dim() == 3:
+            mask_tensor = mask_tensor.permute(2, 0, 1)[:1,...].unsqueeze(0)
+        mask_tensor = torch.nn.functional.interpolate(mask_tensor, size=resize_shape, mode='nearest')
+        loaded_mask = mask_tensor.squeeze(0)  # [1, H, W]
+
+    # Resize depth
+    loaded_depth = None
+    if hasattr(cam_info, 'gt_depth') and cam_info.gt_depth is not None:
+        import torch
+        depth_tensor = torch.from_numpy(cam_info.gt_depth).float()
+        if depth_tensor.dim() == 2:
+            depth_tensor = depth_tensor.unsqueeze(0).unsqueeze(0)
+        elif depth_tensor.dim() == 3:
+            if depth_tensor.shape[2] <= 4:
+                depth_tensor = depth_tensor.permute(2, 0, 1)
+            depth_tensor = depth_tensor[:1, :, :].unsqueeze(0)
+        depth_tensor = torch.nn.functional.interpolate(depth_tensor, size=resize_shape, mode='bilinear', align_corners=False)
+        loaded_depth = depth_tensor.squeeze(0)  # [1, H, W]
 
     # # mask
     # if cam_info.gt_alpha_mask is not None:
@@ -96,7 +121,7 @@ def loadCam(args, id, cam_info, resolution_scale):
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                   image=gt_image, gt_alpha_mask=loaded_mask,
-                  image_name=cam_info.image_name, uid=id, data_device=args.data_device)
+                  image_name=cam_info.image_name, uid=id, data_device=args.data_device, gt_depth=loaded_depth)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []

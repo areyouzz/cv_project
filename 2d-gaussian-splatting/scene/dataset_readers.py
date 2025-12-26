@@ -36,8 +36,8 @@ class CameraInfo(NamedTuple):
     image_name: str
     width: int
     height: int
-    # gt_alpha_mask: np.array
-    # gt_depth: np.array
+    gt_alpha_mask: np.array
+    gt_depth: np.array
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -73,8 +73,8 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depths_fold
     cam_infos = []
 
     datasets_root = os.path.dirname(images_folder)
-    # masks_folder = os.path.join(datasets_root, "masks")
-    # depths_folder = os.path.join(datasets_root, "depths")
+    masks_folder = os.path.join(datasets_root, "masks")
+    depths_folder = os.path.join(datasets_root, "depths")
 
     # Load depth metadata
     max_depth_norm = 2.5
@@ -116,14 +116,14 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depths_fold
         image_name = os.path.basename(image_path).split(".")[0]
         image = Image.open(image_path)
 
-        # # 读 masks
-        # gt_alpha_mask = None
-        # mask_path = os.path.join(masks_folder, os.path.basename(image_path) + ".png")
-        # if os.path.exists(mask_path):
-        #     mask = np.array(Image.open(mask_path))
-        #     if len(mask.shape) > 2:
-        #         mask = mask[:, :, 0]
-        #     gt_alpha_mask = mask.astype(np.float32) / 255.0
+        # Load masks
+        gt_alpha_mask = None
+        mask_path = os.path.join(masks_folder, os.path.basename(image_path) + ".png")
+        if os.path.exists(mask_path):
+            mask = np.array(Image.open(mask_path))
+            if len(mask.shape) > 2:
+                mask = mask[:, :, 0]
+            gt_alpha_mask = mask.astype(np.float32) / 255.0
 
         # # 读 depth
         # gt_depth = None
@@ -146,10 +146,10 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depths_fold
 
         # cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
         #                       image_path=image_path, image_name=image_name, width=width, height=height)
-        cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-                              image_path=image_path, image_name=image_name, width=width, height=height)
         # cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
-        #                       image_path=image_path, image_name=image_name, width=width, height=height, gt_alpha_mask=gt_alpha_mask, gt_depth=gt_depth)
+        #                       image_path=image_path, image_name=image_name, width=width, height=height)
+        cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+                              image_path=image_path, image_name=image_name, width=width, height=height, gt_alpha_mask=gt_alpha_mask, gt_depth=gt_depth)
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
