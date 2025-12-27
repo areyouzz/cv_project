@@ -128,31 +128,27 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             depth_diff = torch.abs(rendered_depth - gt_depth)
 
             # if viewpoint_cam.gt_alpha_mask is not None:
-            #     alpha_mask = viewpoint_cam.gt_alpha_mask.cuda()
-            #     depth_mask = depth_mask * alpha_mask
-
-            if viewpoint_cam.gt_alpha_mask is not None:
-                bg_mask = viewpoint_cam.gt_alpha_mask.cuda()
-                fg_mask = 1.0 - bg_mask
+            #     bg_mask = viewpoint_cam.gt_alpha_mask.cuda()
+            #     fg_mask = 1.0 - bg_mask
                 
-                mask_bg_valid = bg_mask * depht_mask
-                if mask_bg_valid.sum() > 0:
-                    l_bg = (depth_diff * mask_bg_valid).sum() / (mask_bg_valid.sum() + 1e-6)
-                    Ll1depth += 2.0 * l_bg
+            #     mask_bg_valid = bg_mask * depht_mask
+            #     if mask_bg_valid.sum() > 0:
+            #         l_bg = (depth_diff * mask_bg_valid).sum() / (mask_bg_valid.sum() + 1e-6)
+            #         Ll1depth += 2.0 * l_bg
 
-                mask_fg_valid = fg_mask * depth_mask
-                if mask_fg_valid.sum() > 0:
-                    l_fg = (depth_diff * mask_fg_valid).sum() / (mask_fg_valid.sum() + 1e-6)
-                    current_weight = depth_l1_weight(iteration)
-                    Ll1depth += current_weight * l_fg
-            else:
-                if depth_l1_weight(iteration) > 0:
-                    Ll1depth += depth_l1_weight(iteration) * (depth_diff * depth_mask).sum() / (depth_mask.sum() + 1e-6)
+            #     mask_fg_valid = fg_mask * depth_mask
+            #     if mask_fg_valid.sum() > 0:
+            #         l_fg = (depth_diff * mask_fg_valid).sum() / (mask_fg_valid.sum() + 1e-6)
+            #         current_weight = depth_l1_weight(iteration)
+            #         Ll1depth += current_weight * l_fg
+            # else:
+            #     if depth_l1_weight(iteration) > 0:
+            #         Ll1depth += depth_l1_weight(iteration) * (depth_diff * depth_mask).sum() / (depth_mask.sum() + 1e-6)
 
             # L1 loss
-            # depth_error = torch.abs(rendered_depth - gt_depth) * depth_mask
-            # Ll1depth = depth_error.sum() / (depth_mask.sum() + 1e-6)
-            # Ll1depth = depth_l1_weight(iteration) * Ll1depth
+            depth_error = torch.abs(rendered_depth - gt_depth) * depth_mask
+            Ll1depth = depth_error.sum() / (depth_mask.sum() + 1e-6)
+            Ll1depth = depth_l1_weight(iteration) * Ll1depth
 
         # loss
         total_loss = loss + dist_loss + normal_loss + Ll1depth  # add depth loss
